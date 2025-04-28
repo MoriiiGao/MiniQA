@@ -1,0 +1,23 @@
+2025-03-22 00:47:08,569 - INFO - ✅ 日志初始化完成 | 路径: train_logs\20250322_004708.log
+2025-03-22 00:47:09,991 - INFO - 📌 当前配置信息
+2025-03-22 00:47:09,991 - INFO -     out_dir: out
+2025-03-22 00:47:09,991 - INFO -     epochs: 1
+2025-03-22 00:47:09,991 - INFO -     batch_size: 1
+2025-03-22 00:47:09,991 - INFO -     learning_rate: 0.0005
+2025-03-22 00:47:09,991 - INFO -     device: cuda:0
+2025-03-22 00:47:09,991 - INFO -     dtype: bfloat16
+2025-03-22 00:47:09,991 - INFO -     use_wandb: False
+2025-03-22 00:47:09,991 - INFO -     wandb_project: MiniMind-Pretrain
+2025-03-22 00:47:09,997 - INFO -     num_workers: 1
+2025-03-22 00:47:09,997 - INFO -     ddp: False
+2025-03-22 00:47:09,997 - INFO -     accumulation_steps: 8
+2025-03-22 00:47:09,997 - INFO -     grad_clip: 1.0
+2025-03-22 00:47:09,997 - INFO -     warmup_iters: 0
+2025-03-22 00:47:09,997 - INFO -     log_interval: 100
+2025-03-22 00:47:09,997 - INFO -     save_interval: 100
+2025-03-22 00:47:09,997 - INFO -     local_rank: -1
+2025-03-22 00:47:09,997 - INFO -     dim: 8
+2025-03-22 00:47:09,997 - INFO -     n_layers: 1
+2025-03-22 00:47:09,997 - INFO -     max_seq_len: 16
+2025-03-22 00:47:09,997 - INFO -     use_moe: False
+2025-03-22 00:47:09,997 - INFO -     data_path: D:/iscas/LLM/minimind-master/dataset/pretrain_hq.jsonl

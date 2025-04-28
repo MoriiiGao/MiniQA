@@ -1,0 +1,26 @@
+2025-04-12 17:53:03,975 - INFO - ✅ 日志初始化完成 | 路径: train_logs\20250412_175303.log
+2025-04-12 17:53:03,976 - INFO - 📌 ✨ 当前训练配置
+2025-04-12 17:53:03,976 - INFO -     out_dir: out
+2025-04-12 17:53:03,976 - INFO -     epochs: 1
+2025-04-12 17:53:03,976 - INFO -     batch_size: 1
+2025-04-12 17:53:03,976 - INFO -     learning_rate: 0.0005
+2025-04-12 17:53:03,976 - INFO -     device: cuda:0
+2025-04-12 17:53:03,976 - INFO -     dtype: bfloat16
+2025-04-12 17:53:03,976 - INFO -     use_wandb: False
+2025-04-12 17:53:03,976 - INFO -     wandb_project: MiniSex-Pretrain
+2025-04-12 17:53:03,982 - INFO -     num_workers: 1
+2025-04-12 17:53:03,982 - INFO -     ddp: False
+2025-04-12 17:53:03,982 - INFO -     accumulation_steps: 8
+2025-04-12 17:53:03,983 - INFO -     grad_clip: 1.0
+2025-04-12 17:53:03,983 - INFO -     warmup_iters: 0
+2025-04-12 17:53:03,983 - INFO -     log_interval: 100
+2025-04-12 17:53:03,983 - INFO -     save_interval: 100
+2025-04-12 17:53:03,983 - INFO -     local_rank: -1
+2025-04-12 17:53:03,983 - INFO -     dim: 8
+2025-04-12 17:53:03,983 - INFO -     n_layers: 1
+2025-04-12 17:53:03,983 - INFO -     max_seq_len: 512
+2025-04-12 17:53:03,984 - INFO -     use_moe: False
+2025-04-12 17:53:03,984 - INFO -     data_path: D:\iscas\LLM\MiniQA\dataset\dataset\MilitaryIssues.jsonl
+2025-04-12 17:53:03,984 - INFO -     tokenizer_path: D:\iscas\LLM\MiniQA\model\PretrainTokenizer
+2025-04-12 17:53:05,039 - INFO - ⚠️ WandB 未启用或非主进程
+2025-04-12 17:53:05,039 - INFO - ⚡️ 初始化完成，准备开始训练...

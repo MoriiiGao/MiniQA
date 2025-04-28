@@ -1,0 +1,23 @@
+2025-04-09 22:38:36,838 - INFO - ✅ 日志初始化完成 | 路径: train_logs\20250409_223836.log
+2025-04-09 22:38:36,839 - INFO - 📌 ✨ 当前训练配置
+2025-04-09 22:38:36,839 - INFO -     out_dir: out
+2025-04-09 22:38:36,839 - INFO -     epochs: 1
+2025-04-09 22:38:36,839 - INFO -     batch_size: 1
+2025-04-09 22:38:36,840 - INFO -     learning_rate: 0.0005
+2025-04-09 22:38:36,840 - INFO -     device: cuda:0
+2025-04-09 22:38:36,840 - INFO -     dtype: bfloat16
+2025-04-09 22:38:36,840 - INFO -     use_wandb: False
+2025-04-09 22:38:36,840 - INFO -     wandb_project: MiniSex-Pretrain
+2025-04-09 22:38:36,846 - INFO -     num_workers: 1
+2025-04-09 22:38:36,846 - INFO -     ddp: False
+2025-04-09 22:38:36,846 - INFO -     accumulation_steps: 8
+2025-04-09 22:38:36,847 - INFO -     grad_clip: 1.0
+2025-04-09 22:38:36,847 - INFO -     warmup_iters: 0
+2025-04-09 22:38:36,847 - INFO -     log_interval: 100
+2025-04-09 22:38:36,847 - INFO -     save_interval: 100
+2025-04-09 22:38:36,847 - INFO -     local_rank: -1
+2025-04-09 22:38:36,847 - INFO -     dim: 8
+2025-04-09 22:38:36,847 - INFO -     n_layers: 1
+2025-04-09 22:38:36,847 - INFO -     max_seq_len: 16
+2025-04-09 22:38:36,848 - INFO -     use_moe: False
+2025-04-09 22:38:36,848 - INFO -     data_path: D:/iscas/LLM/minimind-master/dataset/pretrain_hq.jsonl
