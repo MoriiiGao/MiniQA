@@ -3,10 +3,10 @@ from typing import Optional, Union, Dict
 
 
 # 📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘
-#                                             MiniQA Config
+#                                             DeciMind Config
 # 📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘
 
-class MiniQAConfig(PretrainedConfig):
+class DeciMindConfig(PretrainedConfig):
     """
     A configuration class for the littleLM language model.
 
@@ -47,7 +47,7 @@ class MiniQAConfig(PretrainedConfig):
         to_dict(): Returns the configuration as a dict, including base class params.
 
     Example:
-        >>> config = MiniQAConfig(dim=256, n_layers=4, use_moe=True)
+        >>> config = DeciMindConfig(dim=256, n_layers=4, use_moe=True)
         >>> print(config.to_dict())
     """
     model_type = "littleLM"
@@ -105,7 +105,7 @@ class MiniQAConfig(PretrainedConfig):
         super().__init__(**kwargs)
 
     @classmethod
-    def from_dict(cls, config_dict: Dict) -> "MiniQAConfig":
+    def from_dict(cls, config_dict: Dict) -> "DeciMindConfig":
         return cls(**config_dict)
 
     def to_dict(self) -> Dict:
@@ -135,7 +135,7 @@ class MiniQAConfig(PretrainedConfig):
         return config
 
 # 📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘
-#                                             MiniQA Model
+#                                             DeciMind Model
 # 📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘📘
 
 from typing import Optional, Tuple, List
@@ -146,7 +146,7 @@ import torch.nn.functional as F
 from transformers import PreTrainedModel
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
-from model.model_miniqa import MiniQAConfig
+from model.model_decimind import DeciMindConfig
 from log.LoggerHelper import LoggerHelper
 
 logger = LoggerHelper(name="Model", log_dir="train_logs")
@@ -263,7 +263,7 @@ class Attention(nn.Module):
     输入：[batch_size, seq_len, dim]
     输出：[batch_size, seq_len,dim]
     """
-    def __init__(self, config: MiniQAConfig):
+    def __init__(self, config: DeciMindConfig):
         super().__init__()
 
         self.n_heads = config.n_heads
@@ -368,7 +368,7 @@ class FeedForward(nn.Module):
 
 
     """
-    def __init__(self, config: MiniQAConfig):
+    def __init__(self, config: DeciMindConfig):
         super().__init__()
 
         # 自动计算 hidden_dim（推荐结构）并向上取整到 multiple_of 的倍数
@@ -410,7 +410,7 @@ class MoEGate(nn.Module):
 
 
     """
-    def __init__(self, config: MiniQAConfig):
+    def __init__(self, config: DeciMindConfig):
         super().__init__()
         self.config = config
         self.top_k = config.num_experts_per_tok
@@ -504,7 +504,7 @@ class MOEFeedForward(nn.Module):
     - 推理阶段仅使用 top-1 专家，提高效率
     - 支持共享专家路径（Shared Experts）
     """
-    def __init__(self, config: MiniQAConfig):
+    def __init__(self, config: DeciMindConfig):
         super().__init__()
         self.config = config
         self.experts = nn.ModuleList([
@@ -593,9 +593,9 @@ class MOEFeedForward(nn.Module):
 
         return expert_cache
 
-class MiniQABlock(nn.Module):
+class DeciMindBlock(nn.Module):
     """
-    MiniQABlock 是 LLM 模型中的基本构建单元之一，通常被多次堆叠以构成完整的 Transformer 结构。
+    DeciMindBlock 是 LLM 模型中的基本构建单元之一，通常被多次堆叠以构成完整的 Transformer 结构。
 
     模块结构：
     - 规范化 + 多头注意力（Attention）
@@ -605,9 +605,9 @@ class MiniQABlock(nn.Module):
 
     参数:
         layer_id (int): 当前层编号，仅用于追踪或调试。
-        config (MiniQAConfig): 模型配置参数，包含维度、头数、是否启用 MoE 等。
+        config (DeciMindConfig): 模型配置参数，包含维度、头数、是否启用 MoE 等。
     """
-    def __init__(self, layer_id: int, config: MiniQAConfig):
+    def __init__(self, layer_id: int, config: DeciMindConfig):
         super().__init__()
         self.layer_id = layer_id
         self.n_heads = config.n_heads
@@ -659,11 +659,11 @@ class MiniQABlock(nn.Module):
 
         return out, past_kv
 
-class MiniQALM(PreTrainedModel):
+class DeciMindLM(PreTrainedModel):
 
-    config_class = MiniQAConfig
+    config_class = DeciMindConfig
 
-    def __init__(self, config: MiniQAConfig):
+    def __init__(self, config: DeciMindConfig):
         super().__init__(config)
         self.vocab_size = config.vocab_size
         self.n_layers = config.n_layers
@@ -673,7 +673,7 @@ class MiniQALM(PreTrainedModel):
         self.dropout = nn.Dropout(config.dropout)
 
         # Transformer Block 结构
-        self.layers = nn.ModuleList([MiniQABlock(i, config) for i in range(config.n_layers)])
+        self.layers = nn.ModuleList([DeciMindBlock(i, config) for i in range(config.n_layers)])
         self.norm = RMSNorm(config.dim, eps=config.norm_eps)
 
         # 输出层
@@ -841,14 +841,14 @@ class MiniQALM(PreTrainedModel):
             if next_token.item() == eos_token_id:
                 break
 
-class MiniQALMLite(PreTrainedModel):
+class DeciMindLMLite(PreTrainedModel):
     """
-    MiniQALM（简化版）用于轻量级本地调试，仅保留 Embedding、Dropout、Linear 层，
+    DeciMindLM（简化版）用于轻量级本地调试，仅保留 Embedding、Dropout、Linear 层，
     无 Transformer Block、无 RoPE。
     """
-    config_class = MiniQAConfig
+    config_class = DeciMindConfig
 
-    def __init__(self, config: MiniQAConfig):
+    def __init__(self, config: DeciMindConfig):
         super().__init__(config)
 
         self.vocab_size = config.vocab_size

@@ -1,6 +1,7 @@
 """
-MiniQALM - Industrial Grade Training Bootstrapper
+DeciMindLM - Industrial Grade Training Bootstrapper
 Author: MoriiiGao
+DeciMind
 """
 import os
 import sys
@@ -18,17 +19,17 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DistributedSampler, DataLoader
 from transformers import AutoTokenizer
 
-from dataset.miniqa_dataset import PretrainDataset
-from model.model_miniqa import MiniQAConfig
+from dataset.decimind_dataset import PretrainDataset
+from model.model_decimind import DeciMindConfig
 from log.LoggerHelper import LoggerHelper
-from model.model_miniqa import MiniQALMLite, MiniQALM
+from model.model_decimind import DeciMindLMLite, DeciMindLM
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
    
-class MiniQATrainer:
+class DeciMindTrainer:
     def __init__(self):
         self.args = self._parse_arguments()
-        self.logger = LoggerHelper(name="MiniQATrainer", log_dir="train_logs")
+        self.logger = LoggerHelper(name="DeciMindTrainer", log_dir="train_logs")
         self.logger.log_dict("\u2728 当前训练配置", vars(self.args))
 
         self.ddp = int(os.environ.get("RANK", -1)) != -1
@@ -43,13 +44,13 @@ class MiniQATrainer:
         self._maybe_init_wandb()
 
     def _parse_arguments(self):
-        parser = argparse.ArgumentParser(description="MiniQA Pretraining Script")
+        parser = argparse.ArgumentParser(description="DeciMind Pretraining Script")
         parser.add_argument("--out_dir", type=str, default="out", help="模型输出目录")
-
+        # 快速实现zero 1个epoch即可 正常2-6个epoch
         parser.add_argument("--epochs", 
-                            type=int, default=1, help="训练总轮数")
+                            type=int, default=6, help="训练总轮数")
         parser.add_argument("--batch_size", 
-                            type=int, default=32, help="每个batch的样本数")
+                            type=int, default=128, help="每个batch的样本数")
         parser.add_argument("--learning_rate", 
                             type=float, default=5e-4, help="学习率")
         parser.add_argument("--device", 
@@ -59,7 +60,7 @@ class MiniQATrainer:
         parser.add_argument("--use_wandb", 
                             action="store_true", help="是否启用 wandb 记录")
         parser.add_argument("--wandb_project", 
-                            type=str, default="MiniQA-Pretrain", help="wandb 项目名称")
+                            type=str, default="DeciMind-Pretrain", help="wandb 项目名称")
         parser.add_argument("--num_workers", 
                             type=int, default=1, help="DataLoader 工作线程数")
         parser.add_argument("--ddp", 
@@ -98,7 +99,7 @@ class MiniQATrainer:
         self.args.device = torch.device(self.device)
 
     def _build_config(self):
-        return MiniQAConfig(
+        return DeciMindConfig(
             dim=self.args.hidden_size,
             n_layers=self.args.num_hidden_layer,
             max_seq_len=self.args.max_seq_len,
@@ -112,9 +113,9 @@ class MiniQATrainer:
         if not os.path.exists(self.args.tokenizer_path):
             raise FileNotFoundError(f"Tokenizer 路径不存在: {self.args.tokenizer_path}")
         tokenizer = AutoTokenizer.from_pretrained(self.args.tokenizer_path)
-        model = MiniQALM(self.lm_config).to(self.args.device)
+        model = DeciMindLM(self.lm_config).to(self.args.device)
         self.logger.info(
-            f'MiniQA可训练总参数量：{sum(p.numel() for p in model.parameters() if p.requires_grad) / 1e6:.3f} 百万'
+            f'DeciMind可训练总参数量：{sum(p.numel() for p in model.parameters() if p.requires_grad) / 1e6:.3f} 百万'
         )
         return tokenizer, model
 
@@ -127,7 +128,7 @@ class MiniQATrainer:
         self.args.tokens_per_iter = self.args.batch_size * self.lm_config.max_seq_len
 
     def _maybe_init_wandb(self):
-        self.args.wandb_run_name = f"MiniQALM-E{self.args.epochs}-B{self.args.batch_size}-LR{self.args.learning_rate}"
+        self.args.wandb_run_name = f"DeciMindLM-E{self.args.epochs}-B{self.args.batch_size}-LR{self.args.learning_rate}"
         if self.args.use_wandb and (not self.ddp or self.ddp_local_rank == 0):
             import wandb
             self.wandb.init(project=self.args.wandb_project, name=self.args.wandb_run_name)
@@ -280,5 +281,5 @@ class MiniQATrainer:
             self.train_epoch(epoch)
 
 if __name__ == "__main__":
-    trainer = MiniQATrainer()
+    trainer = DeciMindTrainer()
     trainer.run()
