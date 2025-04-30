@@ -1,0 +1,25 @@
+2025-04-29 06:02:06,974 - INFO - ✅ 日志初始化完成 | 路径: train_logs/20250429_060206.log
+2025-04-29 06:02:06,977 - INFO - ✅ 日志初始化完成 | 路径: train_logs/20250429_060206.log
+2025-04-29 06:02:06,978 - INFO - 📌 ✨ 当前训练配置
+2025-04-29 06:02:06,978 - INFO -     out_dir: out
+2025-04-29 06:02:06,978 - INFO -     epochs: 1
+2025-04-29 06:02:06,978 - INFO -     batch_size: 32
+2025-04-29 06:02:06,978 - INFO -     learning_rate: 0.0005
+2025-04-29 06:02:06,978 - INFO -     device: cpu
+2025-04-29 06:02:06,978 - INFO -     dtype: bfloat16
+2025-04-29 06:02:06,978 - INFO -     use_wandb: False
+2025-04-29 06:02:06,978 - INFO -     wandb_project: MiniQA-Pretrain
+2025-04-29 06:02:06,978 - INFO -     num_workers: 1
+2025-04-29 06:02:06,978 - INFO -     ddp: False
+2025-04-29 06:02:06,978 - INFO -     accumulation_steps: 8
+2025-04-29 06:02:06,978 - INFO -     grad_clip: 1.0
+2025-04-29 06:02:06,978 - INFO -     warmup_iters: 0
+2025-04-29 06:02:06,978 - INFO -     log_interval: 100
+2025-04-29 06:02:06,978 - INFO -     save_interval: 100
+2025-04-29 06:02:06,978 - INFO -     local_rank: -1
+2025-04-29 06:02:06,978 - INFO -     hiddeng_size: 512
+2025-04-29 06:02:06,978 - INFO -     num_hidden_layer: 8
+2025-04-29 06:02:06,978 - INFO -     max_seq_len: 512
+2025-04-29 06:02:06,978 - INFO -     use_moe: False
+2025-04-29 06:02:06,978 - INFO -     data_path: /root/LLMDataset/MilitaryIssues.jsonl
+2025-04-29 06:02:06,978 - INFO -     tokenizer_path: /root/MiniQA/model/PretrainTokenizer

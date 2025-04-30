@@ -1,0 +1,28 @@
+2025-04-29 16:08:10,318 - INFO - ✅ 日志初始化完成 | 路径: train_logs/20250429_160810.log
+2025-04-29 16:08:10,342 - INFO - ✅ 日志初始化完成 | 路径: train_logs/20250429_160810.log
+2025-04-29 16:08:10,342 - INFO - 📌 ✨ 当前训练配置
+2025-04-29 16:08:10,342 - INFO -     out_dir: out
+2025-04-29 16:08:10,342 - INFO -     epochs: 1
+2025-04-29 16:08:10,342 - INFO -     batch_size: 32
+2025-04-29 16:08:10,342 - INFO -     learning_rate: 0.0005
+2025-04-29 16:08:10,342 - INFO -     device: cpu
+2025-04-29 16:08:10,342 - INFO -     dtype: bfloat16
+2025-04-29 16:08:10,342 - INFO -     use_wandb: False
+2025-04-29 16:08:10,342 - INFO -     wandb_project: MiniQA-Pretrain
+2025-04-29 16:08:10,342 - INFO -     num_workers: 1
+2025-04-29 16:08:10,342 - INFO -     ddp: False
+2025-04-29 16:08:10,342 - INFO -     accumulation_steps: 8
+2025-04-29 16:08:10,342 - INFO -     grad_clip: 1.0
+2025-04-29 16:08:10,342 - INFO -     warmup_iters: 0
+2025-04-29 16:08:10,342 - INFO -     log_interval: 100
+2025-04-29 16:08:10,342 - INFO -     save_interval: 100
+2025-04-29 16:08:10,342 - INFO -     local_rank: -1
+2025-04-29 16:08:10,342 - INFO -     hidden_size: 512
+2025-04-29 16:08:10,342 - INFO -     num_hidden_layer: 8
+2025-04-29 16:08:10,342 - INFO -     max_seq_len: 512
+2025-04-29 16:08:10,342 - INFO -     use_moe: False
+2025-04-29 16:08:10,342 - INFO -     data_path: /root/LLMDataset/MilitaryIssues.jsonl
+2025-04-29 16:08:10,342 - INFO -     tokenizer_path: /root/MiniQA/model/PretrainTokenizer
+2025-04-29 16:08:10,420 - INFO - ⚠️ WandB 未启用或非主进程
+2025-04-29 16:08:10,420 - INFO - ⚡️ 初始化完成，准备开始训练...
+2025-04-29 16:08:10,421 - INFO - ✈️ 每轮迭代步数：1
