@@ -16,9 +16,9 @@ from pathlib import Path
 from torch import optim
 from typing import Any, Callable, Iterator, Optional
 from transformers import GenerationConfig
-from GPRO.gpro_loss import GRPOLoss
-from GPRO.replay_buffer import ReplayBuffer
-from MiniQA.trainer.GPRO.system_prompt import system_prompt, chinese_system_prompt, decimind_system_prompt
+from GRPO.grpo_loss import GRPOLoss
+from GRPO.replay_buffer import ReplayBuffer
+from GRPO.system_prompt import system_prompt, chinese_system_prompt, decimind_system_prompt
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DataLoader, DistributedSampler
 from transformers import AutoTokenizer, AutoModelForCausalLM
