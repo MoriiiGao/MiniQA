@@ -50,7 +50,7 @@ class DeciMindTrainer:
         parser.add_argument("--epochs", 
                             type=int, default=6, help="训练总轮数")
         parser.add_argument("--batch_size", 
-                            type=int, default=128, help="每个batch的样本数")
+                            type=int, default=32, help="每个batch的样本数")
         parser.add_argument("--learning_rate", 
                             type=float, default=5e-4, help="学习率")
         parser.add_argument("--device", 

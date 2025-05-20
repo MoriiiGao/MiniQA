@@ -45,11 +45,9 @@ class MyselfTokenizer:
 
         token_ids = self.add_special_tokens(token_ids)
 
-        # 截断
         if truncation and len(tokens) > max_length:
             tokens_ids = token_ids[:max_length]
 
-        # padding
         attention_mask = [1] * len(token_ids)
         if padding == "max_length" and len(token_ids) < max_length:
             pad_len = max_length - len(token_ids)

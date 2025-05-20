@@ -3,7 +3,9 @@ author:
 """
 import logging
 import os
-from typing import Tuple, List
+import json
+import random
+from typing import Tuple, List, Dict
 
 import torch
 import json
@@ -124,10 +126,320 @@ class PretrainDataset(Dataset):
 
         return X, Y, loss_mask
 
+class SFTDataset(Dataset):
+    """
+    Supervised Fine-Tuning Dataset
+    用于构造DeciMind的监督微调任务 支持ChatML格式对话构建 损失掩码生成等
+    """
+    def __init__(self, jsonl_path: str, tokenizer: PreTrainedTokenizer, max_length: int=1024):
+        """
+        Args:
+            jsonl_path(str): 数据文件路,要求每一行为一条JSON格式对话数据
+            tokenizer: Huggingface或兼容tokeinzer实例
+            max_length(int): 最大序列长度
+        """
+        super().__init__()
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+        self.samples = self._load_data(jsonl_path)
+        self.bos_id = tokenizer('<|im_start|>assistant', add_special_tokens=False).input_ids
+        self.eos_id = tokenizer('<|im_end|>', add_special_tokens=False).input_ids
+
+    def __len__(self):
+        return len(self.samples)
+    
+    def _load_data(self, jsonl_path):
+        samples = []
+        with open(jsonl_path, 'r', encoding='utf-8') as f:
+            for idx, line in enumerate(f, 1):  # 注意这里从1开始编号
+                try:
+                    data = json.loads(line.strip())
+                    samples.append(data)
+                except json.JSONDecodeError as e:
+                    print(f"❌ JSON 解码错误！出错文件：{jsonl_path}")
+                    print(f"🧨 出错行号：{idx}")
+                    print(f"🔍 出错内容：{line.strip()}")
+                    print(f"📍 错误信息：{e}")
+                    raise e
+        return samples
+        
+    def _create_chat_prompt(self, conversations):
+        """
+        构建符合ChatML模板的提示内容
+        Args:
+            conversations(List[Dict]):对话轮列表 依次排列user和assistant发言
+        Returns:
+            str: 构造好的Prompt文本
+        """
+        messages = []
+        for i, turn in enumerate(conversations):
+            role = "user" if i % 2 == 0 else "assistant"
+            messages.append({"role": role, "content": turn["content"]})
+        return self.tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=False
+        )
+    
+    def _generate_loss_mask(self, input_ids):
+        """
+        根据 <|im_start|>assistant 和 <|im_end|> 标记，对 assistant 回复内容生成 loss mask。
+        """
+        loss_mask = [0] * len(input_ids)
+        i = 0
+        max_len = min(len(input_ids), self.max_length)
+
+        while i < max_len:
+            # 尝试匹配 "<|im_start|>assistant"
+            if input_ids[i:i + len(self.bos_id)] == self.bos_id:
+                content_start = i + len(self.bos_id)
+                content_end = content_start
+
+                # 在后续 token 中寻找 <|im_end|>
+                while content_end < max_len:
+                    if input_ids[content_end:content_end + len(self.eos_id)] == self.eos_id:
+                        break
+                    content_end += 1
+
+                # 只对 assistant 回复内容部分启用 loss（跳过起始 token）
+                for j in range(content_start + 1, min(content_end, max_len)):
+                    loss_mask[j] = 1
+
+                # 更新 i 为结尾之后（跳过这一段）
+                i = content_end + len(self.eos_id) if content_end < max_len else max_len
+            else:
+                i += 1
+
+        return loss_mask
+
+
+    def __getitem__(self, index):
+        """
+        获取单挑训练样本 返回模型输入 标签 掩码巡视
+
+        Returns:
+            Tuple[Tensor, Tensor, Tensor]: (input_ids, labels, loss_mask)
+        """
+        sample = self.samples[index] # 获取第i条数据
+        prompt = self._create_chat_prompt(sample["conversations"]) # 获取对话 构造prompt
+        input_ids = self.tokenizer(prompt).input_ids[:self.max_length]
+        input_ids += [self.tokenizer.pad_token_id] * (self.max_length - len(input_ids))
+
+        loss_mask = self._generate_loss_mask(input_ids)
+
+        input_tensor = torch.tensor(input_ids[:-1], dtype=torch.long)
+        label_tensor = torch.tensor(input_ids[1:], dtype=torch.long)
+        mask_tensor = torch.tensor(loss_mask[1:], dtype=torch.long)
+
+        return input_tensor, label_tensor, mask_tensor
+
+class OLDSFTDataset(Dataset):
+    def __init__(self, jsonl_path, tokenizer, max_length=1024):
+        super().__init__()
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+        self.samples = self.load_data(jsonl_path)
+        self.bos_id = tokenizer('<|im_start|>assistant', add_special_tokens=False).input_ids
+        self.eos_id = tokenizer('<|im_end|>', add_special_tokens=False).input_ids
+
+    def __len__(self):
+        return len(self.samples)
+
+    def load_data(self, path):
+        samples = []
+        with open(path, 'r', encoding='utf-8') as f:
+            for line_num, line in enumerate(f, 1):
+                data = json.loads(line.strip())
+                samples.append(data)
+        return samples
+
+    def _create_chat_prompt(self, conversations):
+        """构建符合ChatML格式的对话"""
+        messages = []
+        for i, turn in enumerate(conversations):
+            role = 'user' if i % 2 == 0 else 'assistant'
+            messages.append({"role": role, "content": turn['content']})
+        return self.tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=False
+        )
+
+    def _generate_loss_mask(self, input_ids):
+        loss_mask = [0] * len(input_ids)
+        i = 0
+        while i < len(input_ids):
+            if input_ids[i:i + len(self.bos_id)] == self.bos_id:
+                start = i + len(self.bos_id)
+                end = start
+                while end < len(input_ids):
+                    if input_ids[end:end + len(self.eos_id)] == self.eos_id:
+                        break
+                    end += 1
+                for j in range(start + 1, min(end + len(self.eos_id) + 1, self.max_length)):
+                    loss_mask[j] = 1
+                i = end + len(self.eos_id) if end < len(input_ids) else len(input_ids)
+            else:
+                i += 1
+        return loss_mask
+
+    def __getitem__(self, index):
+        sample = self.samples[index]
+        # 构建对话提示
+        print(sample["conversations"])
+        prompt = self._create_chat_prompt(sample['conversations'])
+        input_ids = self.tokenizer(prompt).input_ids[:self.max_length]
+        input_ids += [self.tokenizer.pad_token_id] * (self.max_length - len(input_ids))
+
+        # 生成动态损失掩码
+        loss_mask = self._generate_loss_mask(input_ids)
+
+        # 构建训练数据
+        X = torch.tensor(input_ids[:-1], dtype=torch.long)
+        Y = torch.tensor(input_ids[1:], dtype=torch.long)
+        loss_mask = torch.tensor(loss_mask[1:], dtype=torch.long)  # 对齐预测位置
+
+        return X, Y, loss_mask
+
+class MixDataset_OLD(Dataset):
+    """
+    LoRA微调 同时读取通用数据(public)与领域数据(domain)
+    训练时按 `p_domain` 概率从域内数据抽样，其余概率抽通用数据。
+
+    每行数据格式：
+    {
+        "conversations": [
+            {"role": "user",      "content": "..."},
+            {"role": "assistant", "content": "..."},
+            ...
+        ]
+    }
+    """
+    def __init__(self, 
+                 domain_path: str, 
+                 public_path: str,
+                 tokenizer: PreTrainedTokenizer,
+                 max_length: int=1024,
+                 p_domain: float=0.7):
+        super().__init__()
+        assert 0.0 <= p_domain <= 1.0, "`p_domain` must be in [0,1]"
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+        self.p_domain = p_domain
+
+        # 载入两份数据
+        self.domain_samples = self._load_jsonl(domain_path)
+        self.public_samples = self._load_jsonl(public_path)
+
+        # 编码special-tokens id
+        self.bos_id = tokenizer('<|im_start|>assistant', add_special_tokens=False).input_ids
+        self.eos_id = tokenizer('<|im_end|>', add_special_tokens=False).input_ids
+
+        # 取最大长度
+        self._max_len = max(len(self.domain_samples), len(self.public_samples))
+        
+    @staticmethod
+    def _load_jsonl(path: str) -> List[Dict]:
+        samples = []
+        with open(path, 'r', encoding="utf-8") as fp:
+            for idx, line in enumerate(fp, 1):  # 从第1行开始计数
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    samples.append(json.loads(line))
+                except json.JSONDecodeError as e:
+                    print(f"❌ JSON解析错误：第 {idx} 行，原因：{e}")
+                    print(f"出错内容：{line}")
+                    raise e  # 如果你希望程序停止运行，否则可删去这一行
+        return samples
+
+    def _build_prompt(self, conversations: List[Dict]) -> str:
+        msgs = [
+            {"role": ("user" if i % 2 == 0 else "assistant"), "content": turn["content"]}
+            for i, turn in enumerate(conversations)
+        ]
+        return self.tokenizer.apply_chat_template(
+            msgs, tokenize=False, add_generation_prompt=False
+        )
+
+    # 生成 loss-mask：仅对 <|im_start|>assistant ... <|im_end|> 之间 token 计算损失
+    def _make_loss_mask(self, ids: List[int]) -> List[int]:
+        mask = [0] * len(ids)
+        i, n = 0, min(len(ids), self.max_length)
+        while i < n:
+            if ids[i : i + len(self.bos_id)] == self.bos_id:
+                s = i + len(self.bos_id)
+                e = s
+                while e < n and ids[e : e + len(self.eos_id)] != self.eos_id:
+                    e += 1
+                for j in range(s + 1, min(e, n)):
+                    mask[j] = 1
+                i = e + len(self.eos_id)
+            else:
+                i += 1
+        return mask
+    # ───────────────────── dataset api ─────────────────────
+    def __len__(self) -> int:
+        return self._max_len
+
+    def __getitem__(self, idx: int):
+        # 动态决定使用哪类数据
+        if random.random() < self.p_domain and self.domain_samples:
+            sample = self.domain_samples[idx % len(self.domain_samples)]
+        else:
+            sample = self.public_samples[idx % len(self.public_samples)]
+
+        prompt      = self._build_prompt(sample["conversations"])
+        input_ids   = self.tokenizer(prompt).input_ids[: self.max_length]
+        pad_len     = self.max_length - len(input_ids)
+        input_ids  += [self.tokenizer.pad_token_id] * pad_len
+
+        loss_mask   = self._make_loss_mask(input_ids)
+
+        # shift-one-token
+        x = torch.tensor(input_ids[:-1],              dtype=torch.long)
+        y = torch.tensor(input_ids[1:],               dtype=torch.long)
+        m = torch.tensor(loss_mask[1:],               dtype=torch.long)
+        return x, y, m
+
+class MixDataset(Dataset):
+    def __init__(self, domain_dataset, public_dataset, p_domain=0.7):
+        self.domain_dataset = domain_dataset
+        self.public_dataset = public_dataset
+        self.p_domain = p_domain
+
+    def __len__(self):
+        return max(len(self.domain_dataset), len(self.public_dataset))
+
+    def __getitem__(self, idx):
+        if random.random() < self.p_domain:
+            return self.domain_dataset[idx % len(self.domain_dataset)]
+        else:
+            return self.public_dataset[idx % len(self.public_dataset)]
+
+
+
+def convert_json_list_to_jsonl(input_path: str, output_path: str):
+    with open(input_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+
+    if not isinstance(data, list):
+        raise ValueError("❌ 输入 JSON 文件结构错误，最外层应为 list。")
+
+    with open(output_path, 'w', encoding='utf-8') as fout:
+        for idx, item in enumerate(data):
+            if not isinstance(item, dict) or "conversations" not in item:
+                raise ValueError(f"❌ 第 {idx + 1} 项不是合法的对话对象，缺少 'conversations' 键。")
+            json_line = json.dumps(item, ensure_ascii=False)
+            fout.write(json_line + '\n')
+
+    print(f"✅ 已成功将 {len(data)} 条对话写入 JSONL 文件: {output_path}")
+
 
 
 if __name__ == "__main__":
-    merge_jsonl_files("/root/LLMDataset/MilitaryIssues.jsonl", "/root/LLMDataset/pretrain_data.jsonl")
+    # merge_jsonl_files("/root/LLMDataset/MilitaryIssues.jsonl", "/root/LLMDataset/pretrain_data.jsonl")
     # dataset_path = "/root/LLMDataset/pretrain_data.jsonl"
     # analyze_dataset(dataset_path)
     # tokenizerPath = "/root/MiniQA/model/PretrainTokenizer"
@@ -147,3 +459,36 @@ if __name__ == "__main__":
 
     #     if idx >= 4:
     #         break
+
+    # ==============================SFTDataset===========================
+    # tokenizerPath = "/root/MiniQA/model/PretrainTokenizer"
+    # tokenizer = AutoTokenizer.from_pretrained(tokenizerPath)
+    # sft_dataset = "/root/LLMDataset/decimin_dataset/sft_512.jsonl"
+    # sftdataset = OLDSFTDataset(sft_dataset, tokenizer)
+
+    # for i in range(100):
+    #     X, Y, mask = sftdataset[i]
+        # print(f"Sample {i}")
+        # print("Input IDs:", X.shape)
+        # print("Labels:", Y.shape)
+        # print(mask)
+        # print("Loss Mask:", mask.sum().item(), "positions used for loss")
+
+    # ==============================Mix SFTDataset===========================
+    tokenizerPath = "/root/MiniQA/model/PretrainTokenizer"
+    tokenizer = AutoTokenizer.from_pretrained(tokenizerPath)
+    Domain_path = "/root/LLMDataset/decimin_dataset/scenario.jsonl"
+    Public_path = "/root/LLMDataset/decimin_dataset/sft_mini_512.jsonl"
+    
+    # mixdata = MixDataset(
+    #     domain_path = Domain_path,
+    #     public_path = Public_path,
+    #     tokenizer   = tokenizer,
+    #     max_length  = 1024,
+    #     p_domain    = 0.7,           # 70% 领域 / 30% 通用
+    # )
+
+    # for i in range(100):
+    #     X, Y, mask = mixdata[i]
+
+    # convert_json_list_to_jsonl(Domain_path, "/root/LLMDataset/decimin_dataset/scenario.jsonl")
