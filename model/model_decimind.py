@@ -37,7 +37,7 @@ class DeciMindConfig(PretrainedConfig):
             vocab_size: int = 6400,
             rms_norm_eps: float = 1e-05,
             rope_theta: float = 1e6,
-            flash_attn: bool = True,
+            flash_attn: bool = False,
             use_moe: bool = False,
             num_experts_per_tok: int = 2,
             n_routed_experts: int = 4,
@@ -234,54 +234,16 @@ class Attention(nn.Module):
             repeat_kv(xk, self.n_rep).transpose(1, 2),
             repeat_kv(xv, self.n_rep).transpose(1, 2)
         )
-        
+
         if self.flash and seq_len != 1:
+            print(self.flash)
             dropout_p = self.dropout if self.training else 0.0
-            # 正确获取 q_len/kv_len
-            q_len = xq.shape[2]
-            kv_len = xk.shape[2]
-
-            # padding mask
+            attn_mask = None
             if attention_mask is not None:
-                padding_mask = attention_mask[:, None, None, :kv_len]  # [bsz, 1, 1, kv_len]
-            else:
-                padding_mask = None
+                attn_mask = attention_mask.view(bsz, 1, 1, -1).expand(bsz, self.n_local_heads, seq_len, -1)
+                attn_mask = attn_mask.bool() if attention_mask is not None else None
 
-            # causal mask
-            causal_mask = torch.triu(
-                torch.full((q_len, kv_len), float("-inf"), device=xq.device),
-                diagonal=1 + kv_len - q_len
-            )[None, None, :, :]  # [1, 1, q_len, kv_len]
-
-            # 合并
-            if padding_mask is not None:
-                attn_mask = causal_mask + (1.0 - padding_mask) * float("-inf")
-            else:
-                attn_mask = causal_mask
-
-            print(f"xq: {xq.shape} | xk: {xk.shape} | mask: {attn_mask.shape}")
-
-            output = F.scaled_dot_product_attention(
-                xq, xk, xv,
-                attn_mask=attn_mask,
-                dropout_p=dropout_p
-            )
-
-
-        # if self.flash and seq_len != 1:
-        #     dropout_p = self.dropout if self.training else 0.0
-        #     attn_mask = None
-        #     if attention_mask is not None:
-        #         attn_mask = attention_mask.view(bsz, 1, 1, -1).expand(bsz, self.n_local_heads, seq_len, -1)
-        #         attn_mask = attn_mask.bool() if attention_mask is not None else None
-        #     print(
-        #     "xq:", xq.size(),
-        #     "|| xk:", xk.size(),
-        #     "|| xv:", xv.size(),
-        #     "|| mask:", attn_mask.size() if attn_mask is not None else "None"
-        #     )
-        #     output = F.scaled_dot_product_attention(xq, xk, xv, attn_mask=attn_mask, dropout_p=dropout_p)
-
+            output = F.scaled_dot_product_attention(xq, xk, xv, attn_mask=attn_mask, dropout_p=dropout_p, is_causal=True)
         else:
             scores = (xq @ xk.transpose(-2, -1)) / math.sqrt(self.head_dim)
             scores = scores + torch.triu(
@@ -512,35 +474,115 @@ class DeciMindLM(nn.Module):
         return hidden_states, presents, aux_loss
 
 # class DeciMindForCausalLM(PreTrainedModel, GenerationMixin):
-
-#     # 是否支持梯度检查点
-#     # supports_gradient_checkpointing = True  
+#     config_class = DeciMindConfig
 
 #     def __init__(self, config: DeciMindConfig = None):
-#         # 接收模型配置对象
+#         self.config = config or DeciMindConfig()
+#         super().__init__(self.config)
+#         self.model = DeciMindLM(self.config)
+#         self.lm_head = nn.Linear(self.config.hidden_size, self.config.vocab_size, bias=False)
+#         self.model.embed_tokens.weight = self.lm_head.weight
+#         self.OUT = CausalLMOutputWithPast()
+
+#     def forward(self,
+#                 input_ids: Optional[torch.Tensor] = None,
+#                 attention_mask: Optional[torch.Tensor] = None,
+#                 past_key_values: Optional[List[Tuple[torch.Tensor, torch.Tensor]]] = None,
+#                 use_cache: bool = False,
+#                 logits_to_keep: Union[int, torch.Tensor] = 0,
+#                 **args):
+#         h, past_kvs, aux_loss = self.model(
+#             input_ids=input_ids,
+#             attention_mask=attention_mask,
+#             past_key_values=past_key_values,
+#             use_cache=use_cache,
+#             **args
+#         )
+#         slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
+#         logits = self.lm_head(h[:, slice_indices, :])
+#         self.OUT.__setitem__('last_hidden_state', h)
+#         self.OUT.__setitem__('logits', logits)
+#         self.OUT.__setitem__('aux_loss', aux_loss)
+#         self.OUT.__setitem__('past_key_values', past_kvs)
+#         return self.OUT
+
+class DeciMindForCausalLM(PreTrainedModel, GenerationMixin):
+
+    # 是否支持梯度检查点
+    # supports_gradient_checkpointing = True  
+
+    def __init__(self, config: DeciMindConfig = None):
+        # 接收模型配置对象
+        self.config = config or DeciMindConfig
+        super().__init__(self.config)
+        
+        # 初始化 transformer      
+        self.model = DeciMindLM(self.config)
+        # 投影层 从隐藏状态 -> vocab logits
+        self.lm_head = nn.Linear(self.config.hidden_size, self.config.vocab_size, bias=False)
+        # 权重共享 嵌入层与输出层共享权重 节省参数 提升性能
+        self.model.embed_tokens.weight = self.lm_head.weight
+        # 构造输出容器
+        self.OUT = CausalLMOutputWithPast()
+    
+    def forward(
+            self, 
+            input_ids: Optional[torch.Tensor] = None, 
+            attention_mask: Optional[torch.Tensor] = None, 
+            past_key_values: Optional[List[Tuple[torch.Tensor, torch.Tensor]]] = None, 
+            use_cache: bool = False, 
+            logits_to_keep: Union[int, torch.Tensor] = 0, 
+            return_dict: Optional[bool] = True,
+            **kwargs):
+        
+        # 调用transofmrer模型主体 输出最后一层的hidden states/缓存的kv/专家路由损失
+        hidden_states, past_kvs, aux_loss = self.model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            past_key_values=past_key_values,
+            use_cache=use_cache,
+            **kwargs
+        )
+        
+        # 计算logits(词预测概率) 将hidden states 传入lm_head投影为[batch, seq, vocab_size]
+        slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
+        logits = self.lm_head(hidden_states[:, slice_indices, :])
+        
+        # 构造标准输出
+        if not return_dict:
+            return ()
+        
+        return CausalLMOutputWithPast(
+            logits=logits,
+            past_key_values=past_kvs,
+            hidden_states=hidden_states,
+            # attentions=None,
+            loss=aux_loss  
+        )
+
+
+# class DeciMindForCausalLM(PreTrainedModel, GenerationMixin):
+
+#     # supports_gradient_checkpointing = True
+
+#     def __init__(self, config: DeciMindConfig = None):
 #         self.config = config or DeciMindConfig
 #         super().__init__(self.config)
-        
-#         # 初始化 transformer      
 #         self.model = DeciMindLM(self.config)
-#         # 投影层 从隐藏状态 -> vocab logits
 #         self.lm_head = nn.Linear(self.config.hidden_size, self.config.vocab_size, bias=False)
-#         # 权重共享 嵌入层与输出层共享权重 节省参数 提升性能
 #         self.model.embed_tokens.weight = self.lm_head.weight
-#         # 构造输出容器
 #         self.OUT = CausalLMOutputWithPast()
-    
+
 #     def forward(
 #             self, 
 #             input_ids: Optional[torch.Tensor] = None, 
 #             attention_mask: Optional[torch.Tensor] = None, 
+#             token_type_ids: Optional[torch.Tensor] = None,
 #             past_key_values: Optional[List[Tuple[torch.Tensor, torch.Tensor]]] = None, 
 #             use_cache: bool = False, 
 #             logits_to_keep: Union[int, torch.Tensor] = 0, 
 #             return_dict: Optional[bool] = True,
 #             **kwargs):
-        
-#         # 调用transofmrer模型主体 输出最后一层的hidden states/缓存的kv/专家路由损失
 #         hidden_states, past_kvs, aux_loss = self.model(
 #             input_ids=input_ids,
 #             attention_mask=attention_mask,
@@ -548,15 +590,10 @@ class DeciMindLM(nn.Module):
 #             use_cache=use_cache,
 #             **kwargs
 #         )
-        
-#         # 计算logits(词预测概率) 将hidden states 传入lm_head投影为[batch, seq, vocab_size]
 #         slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
 #         logits = self.lm_head(hidden_states[:, slice_indices, :])
-        
-#         # 构造标准输出
 #         if not return_dict:
 #             return ()
-        
 #         return CausalLMOutputWithPast(
 #             logits=logits,
 #             past_key_values=past_kvs,
@@ -565,78 +602,36 @@ class DeciMindLM(nn.Module):
 #             loss=aux_loss  
 #         )
 
-
-class DeciMindForCausalLM(PreTrainedModel, GenerationMixin):
-
-    # supports_gradient_checkpointing = True
-
-    def __init__(self, config: DeciMindConfig = None):
-        self.config = config or DeciMindConfig
-        super().__init__(self.config)
-        self.model = DeciMindLM(self.config)
-        self.lm_head = nn.Linear(self.config.hidden_size, self.config.vocab_size, bias=False)
-        self.model.embed_tokens.weight = self.lm_head.weight
-        self.OUT = CausalLMOutputWithPast()
-
-    def forward(
-            self, 
-            input_ids: Optional[torch.Tensor] = None, 
-            attention_mask: Optional[torch.Tensor] = None, 
-            token_type_ids: Optional[torch.Tensor] = None,
-            past_key_values: Optional[List[Tuple[torch.Tensor, torch.Tensor]]] = None, 
-            use_cache: bool = False, 
-            logits_to_keep: Union[int, torch.Tensor] = 0, 
-            return_dict: Optional[bool] = True,
-            **kwargs):
-        hidden_states, past_kvs, aux_loss = self.model(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            past_key_values=past_key_values,
-            use_cache=use_cache,
-            **kwargs
-        )
-        slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
-        logits = self.lm_head(hidden_states[:, slice_indices, :])
-        if not return_dict:
-            return ()
-        return CausalLMOutputWithPast(
-            logits=logits,
-            past_key_values=past_kvs,
-            hidden_states=hidden_states,
-            attentions=None,
-            loss=aux_loss  
-        )
-
-    def prepare_inputs_for_generation(
-        self,
-        input_ids,
-        past_key_values=None,
-        attention_mask=None,
-        token_type_ids= None,
-        **kwargs
-    ):
+#     def prepare_inputs_for_generation(
+#         self,
+#         input_ids,
+#         past_key_values=None,
+#         attention_mask=None,
+#         token_type_ids= None,
+#         **kwargs
+#     ):
         
-        return {
-            "input_ids": input_ids,
-            "past_key_values": past_key_values,
-            "attention_mask": attention_mask,
-            "token_type_ids": token_type_ids,
-            "use_cache": True,
-        }
+#         return {
+#             "input_ids": input_ids,
+#             "past_key_values": past_key_values,
+#             "attention_mask": attention_mask,
+#             "token_type_ids": token_type_ids,
+#             "use_cache": True,
+#         }
 
-    @property
-    def device(self):
-        return next(self.parameters()).device
+#     @property
+#     def device(self):
+#         return next(self.parameters()).device
 
-    def _update_model_kwargs_for_generation(
-        self, outputs, model_kwargs, is_encoder_decoder=False
-    ):
-        # 兼容 HuggingFace generate 底层的 state 传递
-        model_kwargs["past_key_values"] = outputs.past_key_values
-        if "attention_mask" in model_kwargs and model_kwargs["attention_mask"] is not None:
-            model_kwargs["attention_mask"] = torch.cat(
-                [model_kwargs["attention_mask"], torch.ones((model_kwargs["attention_mask"].shape[0], 1), dtype=model_kwargs["attention_mask"].dtype, device=model_kwargs["attention_mask"].device)], dim=-1)
-        return model_kwargs
+#     def _update_model_kwargs_for_generation(
+#         self, outputs, model_kwargs, is_encoder_decoder=False
+#     ):
+#         # 兼容 HuggingFace generate 底层的 state 传递
+#         model_kwargs["past_key_values"] = outputs.past_key_values
+#         if "attention_mask" in model_kwargs and model_kwargs["attention_mask"] is not None:
+#             model_kwargs["attention_mask"] = torch.cat(
+#                 [model_kwargs["attention_mask"], torch.ones((model_kwargs["attention_mask"].shape[0], 1), dtype=model_kwargs["attention_mask"].dtype, device=model_kwargs["attention_mask"].device)], dim=-1)
+#         return model_kwargs
 
 
 

@@ -19,6 +19,7 @@ from transformers import GenerationConfig
 from GRPO.grpo_loss import GRPOLoss
 from GRPO.replay_buffer import ReplayBuffer
 from GRPO.system_prompt import system_prompt, chinese_system_prompt, decimind_system_prompt
+from GRPO.reward_module import composite_reward
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DataLoader, DistributedSampler
 from transformers import AutoTokenizer, AutoModelForCausalLM
