@@ -1,11 +1,17 @@
 """
 author:
 """
+import re
+from pathlib import Path
 import logging
 import os
 import json
 import random
-from typing import Tuple, List, Dict
+from typing import Any, Tuple, List, Dict, Optional
+
+import pandas as pd
+from tokenizer import Tokenizer
+from data_type import MiniBatch
 
 import torch
 import json
@@ -437,6 +443,75 @@ def convert_json_list_to_jsonl(input_path: str, output_path: str):
     print(f"✅ 已成功将 {len(data)} 条对话写入 JSONL 文件: {output_path}")
 
 
+SYSTEM_MESSAGE = (
+    "You are a helpful assistant. You first think about the reasoning process "
+    "in your mind and then provide the user with the answer."
+)
+USER_TEMPLATE = (
+    "Using the numbers {numbers}, create an equation that equals {target}. "
+    "You can use basic arithmetic operations (+, -, *, /) and each number can only be used once. "
+    "Show your work in <think> </think> tags. "
+    "And return the final answer in <answer> </answer> tags, for example <answer> (1 + 2) / 3 </answer>."
+)
+RESPONSE_PROMPT = "Let me solve this step by step.\n<think>"
+
+class CountdownTasksDataset(Dataset):
+    """Prepare Countdown Tasks for training"""
+
+    def __init__(
+        self,
+        tokenizer: Tokenizer,
+        data_path: str,
+        split: str = "train",
+        test_size: int = 100,
+    ):
+        data = pd.read_parquet(Path(data_path) / "data")
+        # use the last `test_size` examples for testing
+        self.data = (
+            data.iloc[:-test_size] if split == "train" else data.iloc[-test_size:]
+        )
+        self.tokenizer = tokenizer
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        item = self.data.iloc[idx].to_dict()
+        item.update(self.encode_prefix(item["nums"], item["target"]))
+        return item
+
+    def encode_prefix(self, numbers: List[int], target: int):
+        """Prefix is the *actual* input to the model."""
+        user_message = USER_TEMPLATE.format(numbers=numbers, target=target)
+        prefix = self.tokenizer.encode_chat_with_response_prompt(
+            [
+                {"role": "system", "content": SYSTEM_MESSAGE},
+                {"role": "user", "content": user_message},
+            ],
+            RESPONSE_PROMPT,
+        )
+        tokens = self.tokenizer.tokenize(prefix)
+        return {
+            "prefix": prefix,
+            "prefix_tokens": tokens.tokens,
+            "prefix_token_ids": tokens.ids,
+        }
+
+    @staticmethod
+    def collate_fn(batch: List[Dict[str, Any]]) -> MiniBatch:
+        """Collate examples into a batch."""
+        numbers = [item["nums"] for item in batch]
+        target = [item["target"] for item in batch]
+        prefix = [item["prefix"] for item in batch]
+        prefix_tokens = [item["prefix_tokens"] for item in batch]
+        prefix_token_ids = [item["prefix_token_ids"] for item in batch]
+        return MiniBatch(
+            numbers=numbers,
+            target=target,
+            prefix=prefix,
+            prefix_tokens=prefix_tokens,
+            prefix_token_ids=prefix_token_ids,
+        )
 
 if __name__ == "__main__":
     # merge_jsonl_files("/root/LLMDataset/MilitaryIssues.jsonl", "/root/LLMDataset/pretrain_data.jsonl")

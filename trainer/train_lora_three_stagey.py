@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import random
 import sys
 
 __package__ = "trainer"
@@ -18,6 +19,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from model.model_decimind import DeciMindConfig, DeciMindForCausalLM
 from dataset.decimind_dataset import SFTDataset
 from model.model_lora import load_lora, save_lora, apply_lora
+from torch.utils.data import Subset
 
 warnings.filterwarnings('ignore')
 
@@ -31,11 +33,11 @@ def Logger(content):
 def get_lr(current_step, total_steps, lr):
     return lr / 10 + 0.5 * lr * (1 + math.cos(math.pi * current_step / total_steps))
 
-# 代码和full_sft「几乎」一致
-def train_epoch(epoch, wandb, iter_per_epoch):
+def train_epoch(epoch, dataloader, wandb, iter_per_epoch, stage_name, stage_epochs):
     loss_fct = nn.CrossEntropyLoss(reduction='none')
     start_time = time.time()
-    for step, (X, Y, loss_mask) in enumerate(train_loader):
+    model.train()
+    for step, (X, Y, loss_mask) in enumerate(dataloader):
         X = X.to(args.device)
         Y = Y.to(args.device)
         loss_mask = loss_mask.to(args.device)
@@ -68,43 +70,32 @@ def train_epoch(epoch, wandb, iter_per_epoch):
 
             scaler.step(optimizer)
             scaler.update()
-
             optimizer.zero_grad(set_to_none=True)
 
         if step % args.log_interval == 0:
             spend_time = time.time() - start_time
             Logger(
-                'Epoch:[{}/{}]({}/{}) loss:{:.3f} lr:{:.12f} epoch_Time:{}min:'.format(
-                    epoch + 1,
-                    args.epochs,
-                    step,
-                    iter_per_epoch,
-                    loss.item() * args.accumulation_steps,
-                    optimizer.param_groups[-1]['lr'],
-                    spend_time / (step + 1) * iter_per_epoch // 60 - spend_time // 60))
-
+                f'{stage_name} Epoch:[{epoch+1}/{stage_epochs}]({step}/{iter_per_epoch}) '
+                f'loss:{loss.item()*args.accumulation_steps:.3f} '
+                f'lr:{optimizer.param_groups[-1]["lr"]:.12f} '
+                f'epoch_Time:{spend_time / (step + 1) * iter_per_epoch // 60 - spend_time // 60}min'
+            )
             if (wandb is not None) and (not ddp or dist.get_rank() == 0):
                 wandb.log({"loss": loss * args.accumulation_steps,
                            "lr": optimizer.param_groups[-1]['lr'],
                            "epoch_Time": spend_time / (step + 1) * iter_per_epoch // 60 - spend_time // 60})
 
         if (step + 1) % args.save_interval == 0 and (not ddp or dist.get_rank() == 0):
-            
             model.eval()
             lora_save_path = (
-                Path(args.save_dir)            # 根目录
-                / "lora"                       # 子目录
+                Path(args.save_dir)
+                / "lora"
                 / f"{args.lora_name}_{lm_config.hidden_size}.pth"
             )
             print(lora_save_path)
-            if not lora_save_path.parent.exists():  # parent 即 …/lora
-                lora_save_path.parent.mkdir(parents=True, exist_ok=True)
-            # lora_save_path = f'{args.save_dir}/lora/{args.lora_name}_{lm_config.hidden_size}.pth'
-            # os.makedirs(os.path.dirname(lora_save_path), exist_ok=True)
-            # 【区别1】只保存lora权重即可
+            lora_save_path.parent.mkdir(parents=True, exist_ok=True)
             save_lora(model, lora_save_path)
             model.train()
-
 
 def init_model(lm_config):
     tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_path)
@@ -113,6 +104,20 @@ def init_model(lm_config):
     ckp = f'{args.save_dir}/full_sft_{lm_config.hidden_size}{moe_path}.pth'
     state_dict = torch.load(ckp, map_location=args.device)
     model.load_state_dict(state_dict, strict=False)
+    return model.to(args.device), tokenizer
+
+def init_qwen_model():
+
+    torch_dtype = {"fp16": torch.float16, "bfloat16": torch.bfloat16}.get(args.dtype, torch.float32)
+
+    tokenizer = AutoTokenizer.from_pretrained(args.qwen_path, trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained(
+        args.qwen_path,
+        torch_dtype=torch_dtype,
+        device_map="auto",             # 多卡自动分配；单卡可用 .to(args.device)
+        trust_remote_code=True
+    )
+
     return model.to(args.device), tokenizer
 
 def init_distributed_mode():
@@ -126,12 +131,25 @@ def init_distributed_mode():
     DEVICE = f"cuda:{ddp_local_rank}"
     torch.cuda.set_device(DEVICE)
 
+def stage_train(dataloader: DataLoader, stage_name: str, epochs: int):
+    """
+    多阶段微调
+    """
+    iter_per_epoch = len(dataloader)
+    print(f"\n{'='*30}\n>>> 开始阶段：{stage_name}，共 {epochs} 轮，每轮 {iter_per_epoch} 步\n{'='*30}")
+    for epoch in range(epochs):
+        train_epoch(epoch, dataloader, wandb, iter_per_epoch, stage_name=stage_name, stage_epochs=epochs)
+
+
 if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description="DeciMind SFT with LoRA")
     parser.add_argument("--out_dir", type=str, default="/root/models/DeciMind")
+    parser.add_argument("--orgi_epochs", type=int, default=1)
+    parser.add_argument("--identity_epochs", type=int, default=2)
+    parser.add_argument("--scenario_epochs", type=int, default=3)
     parser.add_argument("--epochs", type=int, default=10)
-    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--learning_rate", type=float, default=1e-4)
     parser.add_argument("--device", type=str, default="cuda:0" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--dtype", type=str, default="bfloat16")
@@ -149,9 +167,10 @@ if __name__ == "__main__":
     parser.add_argument('--num_hidden_layers', default=8, type=int)
     parser.add_argument('--max_seq_len', default=1024, type=int)
     parser.add_argument('--use_moe', default=True, type=bool)
+    parser.add_argument('--qwen_path', type=str, default='/root/models/Qwen_1.7')
     parser.add_argument('--tokenizer_path', default="/root/MiniQA/model/PretrainTokenizer", type=str)
     parser.add_argument("--identity_data", type=str, default="/root/LLMDataset/decimin_dataset/lora_identity.jsonl")
-    parser.add_argument("--orgi_data", type=str, default="/root/LLMDataset/decimin_dataset/sft_min_512.json")
+    parser.add_argument("--orgi_data", type=str, default="/root/LLMDataset/decimin_dataset/sft_mini_512.jsonl")
     parser.add_argument("--data_path", type=str, default="/root/LLMDataset/decimin_dataset/scenario.jsonl") # scenario.jsonl sft_mini_512.jsonl
     parser.add_argument("--lora_name", type=str, default="lora_deci", help="根据任务保存成lora_XXX")
     args = parser.parse_args()
@@ -187,7 +206,8 @@ if __name__ == "__main__":
     else:
         wandb = None
 
-    model, tokenizer = init_model(lm_config)
+    # model, tokenizer = init_model(lm_config)
+    model, tokenizer = init_qwen_model()
     apply_lora(model)
 
     total_params = sum(p.numel() for p in model.parameters())  # 总参数数量
@@ -223,5 +243,59 @@ if __name__ == "__main__":
     scaler = torch.cuda.amp.GradScaler(enabled=(args.dtype in ['float16', 'bfloat16']))
     iter_per_epoch = len(train_loader)
 
-    for epoch in range(args.epochs):
-        train_epoch(epoch, wandb, iter_per_epoch)
+    identity_ds = SFTDataset(args.identity_data, tokenizer, max_length=args.max_seq_len)
+    orgi_ds     = SFTDataset(args.orgi_data,     tokenizer, max_length=args.max_seq_len)
+    scenario_ds = SFTDataset(args.data_path,     tokenizer, max_length=args.max_seq_len)
+
+    # 分布式采样器（如果用DDP）
+    identity_sampler = DistributedSampler(identity_ds) if ddp else None
+    orgi_sampler     = DistributedSampler(orgi_ds)     if ddp else None
+    scenario_sampler = DistributedSampler(scenario_ds) if ddp else None
+
+    # 预热
+    total_len = len(orgi_ds)
+    sample_size = 20000
+    indices = random.sample(range(total_len), sample_size)
+    orgi_sampled_ds = Subset(orgi_ds, indices)
+
+    orgi_loader = DataLoader(
+        orgi_sampled_ds,
+        batch_size=args.batch_size,
+        pin_memory=True,
+        drop_last=False,
+        shuffle=True,
+        num_workers=args.num_workers,
+        sampler=orgi_sampler
+    )
+
+    # 通识记忆
+    identity_loader = DataLoader(
+        identity_ds,
+        batch_size=args.batch_size,
+        pin_memory=True,
+        drop_last=False,
+        shuffle=(identity_sampler is None),
+        num_workers=args.num_workers,
+        sampler=identity_sampler
+    )
+
+    # 领域知识
+    scenario_loader = DataLoader(
+        scenario_ds,
+        batch_size=args.batch_size,
+        pin_memory=True,
+        drop_last=False,
+        shuffle=(scenario_sampler is None),
+        num_workers=args.num_workers,
+        sampler=scenario_sampler
+    )
+
+    stage_train(orgi_loader, "orgi", args.orgi_epochs)
+
+    # --- 阶段2：通识记忆（身份数据） ---
+    stage_train(identity_loader, "identity", args.identity_epochs)
+
+    # --- 阶段3：领域知识（场景数据） ---
+    stage_train(scenario_loader, "scenario", args.scenario_epochs)
+
+    

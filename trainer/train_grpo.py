@@ -296,6 +296,7 @@ if __name__ == '__main__':
     )
 
     replay_buffer = ReplayBuffer()
+    # GRPO 损失 传入截断阈值、kl权重
     objective = GRPOLoss(clip_eps=args.clip_eps, kl_weight=args.kl_weight)
 
     for k, prompt_batch in enumerate(prompt_loader):

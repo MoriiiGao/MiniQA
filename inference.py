@@ -28,11 +28,16 @@ class DeciMindChatEngine:
             model.load_state_dict(torch.load(ckp, map_location=args.device), strict=True)
             if args.lora_name != 'None':
                 apply_lora(model)
-                load_lora(model, f'./{args.out_dir}/lora/{args.lora_name}_{args.hidden_size}.pth')
+                # load_lora(model, f'./{args.out_dir}/lora/{args.lora_name}_{args.hidden_size}.pth')
+                load_lora(model, args.lora_path)
         else:
-            transformers_model_path = './DeciMind2'
+            transformers_model_path = '/root/models/Qwen_1.7'
             tokenizer = AutoTokenizer.from_pretrained(transformers_model_path)
             model = AutoModelForCausalLM.from_pretrained(transformers_model_path, trust_remote_code=True)
+            if args.lora_name != 'None':
+                apply_lora(model)
+                # load_lora(model, f'./{args.out_dir}/lora/{args.lora_name}_{args.hidden_size}.pth')
+                load_lora(model, args.lora_path)
         print(f'DeciMind模型参数量: {sum(p.numel() for p in model.parameters() if p.requires_grad) / 1e6:.2f}M(illion)')
         return model.eval().to(args.device), tokenizer
 
@@ -63,10 +68,14 @@ class DeciMindChatEngine:
                 ]
             else:
                 lora_prompt_datas = {
-                    'lora_identity': [
-                        "你是ChatGPT吧。",
-                        "你叫什么名字？",
-                        "你和openai是什么关系？"
+                    'lora_deci': [
+                        # "在面临多方向渗透威胁时，我军该如何识别敌主攻方向？",
+                        # "敌方大规模部署电子战平台干扰我无人集群协同，我方应如何保障指挥与数据链稳定？",
+                        # "我军若需在复杂城市环境中组织无人平台集群穿透敌防线，应如何部署与控制？",
+                        # "面对敌方通过外线迂回突袭我西部要地的战略企图，我军应如何拆解应对方案？",
+                        # "未来我军有对'台湾岛登陆作战'的军事问题，请将这个军事问题拆解成更细小的多个作战问题。",
+                        # "未来我军有对'台湾岛登陆作战'的军事问题，请参考下面描述的例子，将这个军事问题拆解成更细小的多个作战问题。例如：'夏威夷岛登陆作战'可拆分为:如何从东部岛屿链登陆作战、如何从南部岛屿链登录作战。参考例子的同时，请加入一些自己的思考",
+                        "请将“对台湾岛登陆作战”这一军事问题，参考“夏威夷岛登陆作战”多方向拆解的方式，细化为多个具体的作战问题。请从登陆方向、作战阶段、兵力协同、重点目标等多个维度进行详细分析，并结合你自己的判断补充创新要点。请以条目形式输出。"
                     ]
                 }
                 prompt_datas = lora_prompt_datas[args.lora_name]
@@ -151,7 +160,8 @@ class DeciMindChatEngine:
 def run_cli(args):
     engine = DeciMindChatEngine(args)
     prompts = engine.get_prompt_datas()
-    test_mode = int(input('[0] 自动测试\n[1] 手动输入\n'))
+    # test_mode = int(input('[0] 自动测试\n[1] 手动输入\n'))
+    test_mode = 0
     messages = []
     print("\n======= DeciMind Chat Engine =======\n")
     if test_mode == 0:
@@ -159,9 +169,10 @@ def run_cli(args):
             DeciMindChatEngine.setup_seed(random.randint(0, 2048))
             print(f"👶: {prompt}")
             messages = messages[-args.history_cnt:] if args.history_cnt else []
+            messages.append({"role": "system", "content": "请您作为军事领域、作战领域、想定设计领域的专家"})
             messages.append({"role": "user", "content": prompt})
             response = engine.invoke(messages)
-            print('🤖️:', response)
+            # print('🤖️:', response)
             messages.append({"role": "assistant", "content": response})
             print("\n")
     else:
@@ -172,6 +183,7 @@ def run_cli(args):
             DeciMindChatEngine.setup_seed(random.randint(0, 2048))
             messages = messages[-args.history_cnt:] if args.history_cnt else []
             messages.append({"role": "user", "content": user_input})
+            messages.append({"role": "system", "content": "请您作为军事领域、作战领域、想定设计领域的专家"})
             response = engine.invoke(messages)
             print('🤖️:', response)
             messages.append({"role": "assistant", "content": response})
@@ -179,7 +191,8 @@ def run_cli(args):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Chat with DeciMind")
-    parser.add_argument('--lora_name', default='None', type=str)
+    parser.add_argument('--lora_name', default='lora_deci', type=str)
+    parser.add_argument('--lora_path', default='/root/models/DeciMind/lora/lora_deci_640.pth', type=str)
     parser.add_argument('--out_dir', default='/root/models/DeciMind', type=str)
     parser.add_argument('--temperature', default=0.85, type=float)
     parser.add_argument('--top_p', default=0.85, type=float)
