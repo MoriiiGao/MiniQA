@@ -1,17 +1,21 @@
 """
 author:
 """
+import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import re
+import numpy as np
 from pathlib import Path
 import logging
-import os
+
 import json
 import random
 from typing import Any, Tuple, List, Dict, Optional
 
 import pandas as pd
-from tokenizer import Tokenizer
-from data_type import MiniBatch
+from dataset.tokenizer import Tokenizer
+from dataset.data_type import MiniBatch
 
 import torch
 import json
@@ -465,7 +469,8 @@ class CountdownTasksDataset(Dataset):
         split: str = "train",
         test_size: int = 100,
     ):
-        data = pd.read_parquet(Path(data_path) / "data")
+        data = pd.read_parquet(Path(data_path))
+        print(data.iloc[0])
         # use the last `test_size` examples for testing
         self.data = (
             data.iloc[:-test_size] if split == "train" else data.iloc[-test_size:]
@@ -511,6 +516,70 @@ class CountdownTasksDataset(Dataset):
             prefix=prefix,
             prefix_tokens=prefix_tokens,
             prefix_token_ids=prefix_token_ids,
+        )
+
+class NewCountdownTasksDataset(Dataset):
+    
+    def __init__(self, tokenizer: Tokenizer, data_path: str, split: str = "train", test_size: int = 100):
+        data = pd.read_parquet(Path(data_path))
+        print("Example record:", data.iloc[0].to_dict())
+        self.data = (
+            data.iloc[:test_size] if split == "train" else data.iloc[-test_size:]
+        ).reset_index(drop=True)
+        self.tokenizer = tokenizer
+    
+    def __len__(self):
+        return len(self.data)
+    
+    def __getitem__(self, idx):
+        item = self.data.iloc[idx].to_dict()
+
+        # 使用 messages 构造对话 prompt
+        messages = item["messages"]
+        if isinstance(messages, str):
+            import json
+            messages = json.loads(messages)
+
+        # 如果是 numpy 数组，转成 list
+        if isinstance(messages, np.ndarray):
+            messages = messages.tolist()
+
+        # 如果是单条 dict，包裹成列表
+        if isinstance(messages, dict):
+            messages = [messages]
+
+        # 最终确保是 list，否则报错
+        if not isinstance(messages, list):
+            raise TypeError(f"`messages` should be a list, got: {type(messages)}")
+
+        # 添加 system message
+        messages = [{"role": "system", "content": SYSTEM_MESSAGE}] + messages
+
+
+        # 编码 prefix prompt
+        prefix = self.tokenizer.encode_chat_with_response_prompt(
+            messages,
+            RESPONSE_PROMPT  # 适配 Qwen tokenizer 风格
+        )
+        tokens = self.tokenizer.tokenize(prefix)
+
+        return {
+            "prefix": prefix,
+            "prefix_tokens": tokens.tokens,
+            "prefix_token_ids": tokens.ids,
+            "target": item.get("answer", ""),  # answer 可用于 reward function
+            "numbers": [],  # 保持 GRPO 接口兼容性（无具体作用）
+        }
+
+    @staticmethod
+    def collate_fn(batch: List[Dict[str, Any]]) -> MiniBatch:
+        """Collate examples into a batch for GRPO."""
+        return MiniBatch(
+            numbers=[item["numbers"] for item in batch],
+            target=[item["target"] for item in batch],
+            prefix=[item["prefix"] for item in batch],
+            prefix_tokens=[item["prefix_tokens"] for item in batch],
+            prefix_token_ids=[item["prefix_token_ids"] for item in batch],
         )
 
 if __name__ == "__main__":

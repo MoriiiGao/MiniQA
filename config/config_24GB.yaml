@@ -1,5 +1,5 @@
 model:
-  pretrained_model_path: "/root/models/Qwen_1.7"
+  pretrained_model_path: "/root/models/Qwen2.5-3B-Instruct"
   device: "cpu" # cuda
   dtype: "bfloat16"
 data:
@@ -17,7 +17,7 @@ training:
   learning_rate: 1.0e-5
   weight_decay: 0.0
   betas: [0.9, 0.999]
-  ckpt_dir: "ckpt"
+  ckpt_dir: "/root/models/Qwen2.5-3B-Instruct/ckpt"
   log_dir: "/root/train_logs"
   skip_unfinished_episodes: false
   ckpt_save_interval: 100

@@ -5,12 +5,17 @@ from typing import Optional, Tuple, Union
 
 import torch
 import torch.nn.functional as F
+import safetensors.torch
 from torch import nn
+from log.LoggerHelper import LoggerHelper
 """
 https://github.com/policy-gradient/GRPO-Zero/blob/main/qwen2_model.py
 https://github.com/anakin87/qwen-scheduler-grpo/blob/main/train_grpo.ipynb
 使用unsloth进行训练 
 """
+logger = LoggerHelper(name="DeciMind-GRPO-Trainer", log_dir="train_logs")
+
+
 
 @dataclass
 class Qwen2Config:
@@ -325,45 +330,118 @@ class Transformer(nn.Module):
         for layer in self.layers:
             layer.self_attn.del_kv_cache()
 
+    # @classmethod
+    # def from_pretrained_old(cls, ckpt_path, device: torch.device):
+    #     config_file = Path(ckpt_path) / "config.json"
+    #     with open(config_file, "r") as f:
+    #         config = json.load(f)
+    #     args = Qwen2Config(
+    #         attention_dropout=config["attention_dropout"],
+    #         bos_token_id=config["bos_token_id"],
+    #         eos_token_id=config["eos_token_id"],
+    #         hidden_act=config["hidden_act"],
+    #         hidden_size=config["hidden_size"],
+    #         initializer_range=config["initializer_range"],
+    #         intermediate_size=config["intermediate_size"],
+    #         max_position_embeddings=config["max_position_embeddings"],
+    #         max_window_layers=config["max_window_layers"],
+    #         model_type=config["model_type"],
+    #         num_hidden_layers=config["num_hidden_layers"],
+    #         num_attention_heads=config["num_attention_heads"],
+    #         num_key_value_heads=config["num_key_value_heads"],
+    #         vocab_size=config["vocab_size"],
+    #         rms_norm_eps=config["rms_norm_eps"],
+    #         rope_theta=config["rope_theta"],
+    #         sliding_window=config["sliding_window"],
+    #         use_sliding_window=config["use_sliding_window"],
+    #         use_cache=config["use_cache"],
+    #         tie_word_embeddings=config["tie_word_embeddings"],
+    #         torch_dtype=config["torch_dtype"],
+    #     )
+    #     with torch.device("meta"):
+    #         model = cls(params=args, device=device)
+
+    #     import safetensors.torch
+
+    #     model_weight_files = sorted(Path(ckpt_path).glob("model*.safetensors"))
+    #     weights = {}
+    #     for file in model_weight_files:
+    #         weights.update(safetensors.torch.load_file(file, device="cpu"))
+    #     # remove "model." prefix from keys
+    #     weights = {k.replace("model.", ""): v for k, v in weights.items()}
+    #     model.load_state_dict(weights, strict=True, assign=True)
+    #     return model.to(device)
+
     @classmethod
-    def from_pretrained(cls, ckpt_path, device: torch.device):
-        config_file = Path(ckpt_path) / "config.json"
+    def from_pretrained(cls, 
+                        ckpt_path: Union[str, Path], 
+                        device: torch.device, 
+                        verbose: bool = True):
+        ckpt_path = Path(ckpt_path)
+        config_file = ckpt_path / "config.json" # 预训练权重的模型结构
+
+        if not config_file.exists():
+            raise FileNotFoundError(f"[Error] config.json not found at: {config_file}")
+        
         with open(config_file, "r") as f:
-            config = json.load(f)
+            try:
+                config = json.load(f)
+            except Exception as e:
+                raise  ValueError(f"Invalid JSON in config file: {e}")
+
+        # 提取参数时带默认值，防止KeyError
         args = Qwen2Config(
-            attention_dropout=config["attention_dropout"],
-            bos_token_id=config["bos_token_id"],
-            eos_token_id=config["eos_token_id"],
-            hidden_act=config["hidden_act"],
-            hidden_size=config["hidden_size"],
-            initializer_range=config["initializer_range"],
-            intermediate_size=config["intermediate_size"],
-            max_position_embeddings=config["max_position_embeddings"],
-            max_window_layers=config["max_window_layers"],
-            model_type=config["model_type"],
-            num_hidden_layers=config["num_hidden_layers"],
-            num_attention_heads=config["num_attention_heads"],
-            num_key_value_heads=config["num_key_value_heads"],
-            vocab_size=config["vocab_size"],
-            rms_norm_eps=config["rms_norm_eps"],
-            rope_theta=config["rope_theta"],
-            sliding_window=config["sliding_window"],
-            use_sliding_window=config["use_sliding_window"],
-            use_cache=config["use_cache"],
-            tie_word_embeddings=config["tie_word_embeddings"],
-            torch_dtype=config["torch_dtype"],
+            attention_dropout=config.get("attention_dropout", 0.0),
+            bos_token_id=config.get("bos_token_id", 1),
+            eos_token_id=config.get("eos_token_id", 2),
+            hidden_act=config.get("hidden_act", "silu"),
+            hidden_size=config.get("hidden_size", 4096),
+            initializer_range=config.get("initializer_range", 0.02),
+            intermediate_size=config.get("intermediate_size", 11008),
+            max_position_embeddings=config.get("max_position_embeddings", 8192),
+            max_window_layers=config.get("max_window_layers", 40),
+            model_type=config.get("model_type", "qwen"),
+            num_hidden_layers=config.get("num_hidden_layers", 32),
+            num_attention_heads=config.get("num_attention_heads", 32),
+            num_key_value_heads=config.get("num_key_value_heads", 8),
+            vocab_size=config.get("vocab_size", 151936),
+            rms_norm_eps=config.get("rms_norm_eps", 1e-5),
+            rope_theta=config.get("rope_theta", 10000),
+            sliding_window=config.get("sliding_window", 4096),
+            use_sliding_window=config.get("use_sliding_window", True),
+            use_cache=config.get("use_cache", True),
+            tie_word_embeddings=config.get("tie_word_embeddings", False),
+            torch_dtype=getattr(torch, config.get("torch_dtype", "float16")),
         )
+
+        if verbose:
+            logger.info(f"[Model] Loading Qwen2 model config from: {config_file}")
+            logger.info(f"[Model] Using device: {device}")
+
+        # 使用meta device预训练初始化模型结构 （不加载权重）
         with torch.device("meta"):
             model = cls(params=args, device=device)
 
-        import safetensors.torch
+        # 加载权重
+        model_weight_files = sorted(ckpt_path.glob("model*.safetensors"))
+        if not model_weight_files:
+            raise FileNotFoundError(f"No model*.safetensors found in {ckpt_path}")
 
-        model_weight_files = sorted(Path(ckpt_path).glob("model*.safetensors"))
         weights = {}
         for file in model_weight_files:
+            if verbose:
+                logger.info(f"[Model] Loading weights from: {file}")
             weights.update(safetensors.torch.load_file(file, device="cpu"))
-        # remove "model." prefix from keys
-        weights = {k.replace("model.", ""): v for k, v in weights.items()}
-        model.load_state_dict(weights, strict=True, assign=True)
+
+        cleaned_weights = {
+            (k[6:] if k.startswith("model.") else k): v
+            for k, v in weights.items()
+        }
+
+        # 加载权重
+        try:
+            model.load_state_dict(cleaned_weights, strict=True, assign=True)
+        except Exception as e:
+            raise RuntimeError(f"Failed to load weights: {e}")
+
         return model.to(device)
-    

@@ -27,7 +27,7 @@ def rollout(
     num_answer_per_question: int,
     reward_function: Callable,
     device: torch.device,
-    dtype: torch.type
+    dtype: torch.dtype
 ) -> List[Episode]:
     """
     轨迹采样（采样生成回答）
@@ -302,10 +302,41 @@ def update_policy(model,
         with torch.autocast(device_type=device.type, dtype=dtype):
             input_token_ids = batch_token_ids[:, :-1]
             target_token_ids = batch_token_ids[: , 1:]
-            target_masks = batch_masks[:, 1:]
+            target_masks = batch_masks[:, 1:] 
             logits = model.forward(input_token_ids).float()
         
+        # 用模型输出的logits和目标target_token_ids做逐token的交叉熵损失，并加负号得到log_probs
+        # logits: 模型输出的预测值 [batch_size, seq_len, vocab_size]
+        # target_token_ids: 目标token [batch_size, seq_len]
+        # log_probs: 每个token的对数概率 [batch_size, seq_len]
         log_probs = -F.cross_entropy(
-            logits.reshape
-        )
+            logits.reshape(-1, logits.size(-1)), # [batch_size, seq_len, vocab_size] -> [batch_size * seq_len, vocab_size]
+            target_token_ids.reshape(-1), # [batch_size ,seq_len] -> [batch_size * seq_len]
+            ignore_index=pad_token_id,
+            reduction="none" # 保留所有位置的loss 不求和不求平均
+        ).reshape(input_token_ids.shape[0], -1)
+
+        # 计算当前batch的平均token级别信息熵
+        with torch.no_grad():
+            # token_entropy： 每个token的softmax熵值 [batch_size, seq_len]
+            token_entropy = compute_entropy(logits)
+            # (token_entropy * target_masks).sum() / num_target_tokens ： 计算token的平均entropy
+            # entropy = entropy + (...) ：多个micro-batch可能会累计的entropy
+            entropy = entropy + (token_entropy * target_masks).sum() / num_target_tokens
+        
+        obj = log_probs * batch_advantages[:, None]
+        obj = (obj * target_masks).sum() / num_target_tokens
+        loss = -obj
+        loss.backward()
        
+    # update the policy
+    grad_norm = torch.nn.utils.clip_grad_norm_(
+        model.parameters(), max_norm=max_grad_norm
+    )
+    optimizer.step()
+    optimizer.zero_grad(set_to_none=True)
+    return {
+        "loss": loss.item(),
+        "grad_norm": grad_norm.item(),
+        "entropy": entropy.item(),
+    }
